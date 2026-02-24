@@ -225,6 +225,18 @@ def grant_sub_final(call):
 
     # Обработка тестовой подписки на 1 минуту
     if days == -3:
+        cluster = db.get_user_cluster(user_id)
+        if not cluster:
+            cluster = db.allocate_cluster()
+            if not cluster:
+                bot.edit_message_text(
+                    "❌ Нет свободных мест на серверах для выдачи тестовой подписки.",
+                    call.message.chat.id, call.message.message_id
+                )
+                return
+            db.set_user_cluster(user_id, cluster)
+            db.change_cluster_users_count(cluster, 1)
+
         import time, requests
         now = int(time.time())
         expire = now + 60
@@ -245,11 +257,10 @@ def grant_sub_final(call):
                 json=user_data
             )
         else:
-            vless_inbounds = marzban.get_vless_inbounds()
             payload = {
                 "username": username,
                 "proxies": {"vless": {"flow": "xtls-rprx-vision"}},
-                "inbounds": {"vless": vless_inbounds} if vless_inbounds else {},
+                "inbounds": {"vless": [cluster]} if cluster else {},
                 "expire": expire,
                 "data_limit": 0,
                 "status": "active"
@@ -288,9 +299,14 @@ def grant_sub_final(call):
     cluster = db.get_user_cluster(user_id)
     if not cluster:
         cluster = db.allocate_cluster()
-        if cluster:
-            db.set_user_cluster(user_id, cluster)
-            db.change_cluster_users_count(cluster, 1)
+        if not cluster:
+            bot.edit_message_text(
+                "❌ Нет свободных мест на серверах для выдачи новой подписки.",
+                call.message.chat.id, call.message.message_id
+            )
+            return
+        db.set_user_cluster(user_id, cluster)
+        db.change_cluster_users_count(cluster, 1)
 
     db.add_subscription(user_id, days)
     marzban.add_days(user_id, days, cluster_tag=cluster)
@@ -803,14 +819,45 @@ def admin_export_db(call):
 
 @bot.callback_query_handler(func=lambda c: c.data == "admin_export_raw")
 def admin_export_raw(call):
-    """Отправляет сырой .db файл"""
+    """Отправляет сырой .db файл через безопасный Backup API"""
     if call.from_user.id != Config.ADMIN_ID:
         return
     
-    bot.answer_callback_query(call.id, "⏳ Отправляю файл...")
+    bot.answer_callback_query(call.id, "⏳ Создаю безопасную копию базы...")
     
     import os
-    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vpn_bot.db")
+    import sqlite3
+    import time
     
-    with open(db_path, "rb") as f:
-        bot.send_document(call.message.chat.id, f, caption="📥 Сырая база данных (vpn_bot.db)")
+    db_path = Config.DB_PATH
+    backup_path = db_path + ".backup"
+    
+    try:
+        # 1. Открываем соединения
+        src = sqlite3.connect(db_path, timeout=10)
+        dst = sqlite3.connect(backup_path)
+        
+        # 2. Делаем безопасный бэкап
+        src.backup(dst)
+        
+        # 3. КРИТИЧЕСКИ ВАЖНО: закрываем соединения!
+        # Это сбрасывает все буферы из оперативки на диск и снимает локи с файла
+        src.close()
+        dst.close()
+        
+        # 4. Читаем и отправляем готовый файл
+        with open(backup_path, "rb") as f:
+            bot.send_document(
+                call.message.chat.id, 
+                f, 
+                visible_file_name=f"vpn_bot_backup_{int(time.time())}.db",
+                caption="📥 Безопасный экспорт базы данных (включая WAL)"
+            )
+            
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Ошибка создания бэкапа: {e}")
+        
+    finally:
+        # 5. Убираем за собой в любом случае (даже если отправка упала с ошибкой сети)
+        if os.path.exists(backup_path):
+            os.remove(backup_path)

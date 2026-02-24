@@ -6,7 +6,7 @@ from dateutil.relativedelta import relativedelta
 
 class Database:
     def __init__(self, path):
-        self.conn = sqlite3.connect(path, check_same_thread=False)
+        self.conn = sqlite3.connect(path, check_same_thread=False, timeout=20.0)
         self.cursor = self.conn.cursor()
         
         # Включаем режим WAL для многопоточности бота

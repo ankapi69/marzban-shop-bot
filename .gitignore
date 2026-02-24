@@ -3,6 +3,11 @@
 
 # База данных
 *.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.db-journal
 
 # Python
 __pycache__/

@@ -1,9 +1,12 @@
 import threading
 import time
+import signal
+import sys
 from loader import bot, db, marzban
 from utils import keyboards
 import handlers.user
 import handlers.admin
+from config import Config
 
 from services.server import run_server
 
@@ -51,8 +54,33 @@ def subscription_checker():
             print(f"⚠️ Ошибка проверки подписок: {e}")
 
 
+def graceful_shutdown(signum, frame):
+    print("\n🛑 Получен сигнал завершения. Сохраняем базу данных...")
+    try:
+        if db and db.conn:
+            # Принудительно сбрасываем WAL журнал в основную БД перед закрытием
+            db.cursor.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+            db.conn.commit()
+            db.conn.close()
+            print("✅ База данных успешно сохранена и закрыта.")
+    except Exception as e:
+        print(f"⚠️ Ошибка при закрытии БД: {e}")
+    sys.exit(0)
+
 if __name__ == "__main__":
     print("🚀 Запуск системы...")
+
+    # Перехватываем сигналы остановки контейнера/скрипта (Ctrl+C, kill)
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+
+    # Получаем юзернейм бота один раз при старте
+    try:
+        bot_info = bot.get_me()
+        Config.BOT_USERNAME = bot_info.username
+        print(f"🤖 Имя бота: @{Config.BOT_USERNAME}")
+    except Exception as e:
+        print(f"⚠️ Ошибка получения юзернейма бота: {e}")
 
     # Запускаем Flask-сервер для вебхуков Lava в фоне
     flask_thread = threading.Thread(target=run_server, daemon=True)
