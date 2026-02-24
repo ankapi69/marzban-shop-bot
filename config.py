@@ -5,6 +5,7 @@ load_dotenv()
 
 class Config:
     BOT_TOKEN = os.getenv("BOT_TOKEN")
+    BOT_USERNAME = os.getenv("BOT_USERNAME", "vpn_bot")
     ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     
     # Marzban

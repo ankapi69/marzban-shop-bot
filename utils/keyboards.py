@@ -106,8 +106,11 @@ def admin_menu(current_price=150, trial_days=0, ref_percent=20, min_topup=10):
     # === БЛОК 0: Дашборд ===
     kb.add(types.InlineKeyboardButton("📊 Статистика", callback_data="admin_dashboard"))
     
-    # === БЛОК 1: Управление продажами ===
-    kb.add(types.InlineKeyboardButton("🔧 Управление продажами", callback_data="admin_sales_menu"))
+    # === БЛОК 1: Управление продажами & Кластеры ===
+    kb.add(
+        types.InlineKeyboardButton("🔧 Управление продажами", callback_data="admin_sales_menu"),
+        types.InlineKeyboardButton("🌐 Кластеры", callback_data="admin_cluster_menu")
+    )
     
     kb.add(
         types.InlineKeyboardButton("📋 Тарифы", callback_data="admin_tariffs"),
@@ -217,4 +220,50 @@ def expiry_notification_menu():
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(types.InlineKeyboardButton("⚡ Продлить подписку", callback_data="choose_tariff"))
     kb.add(types.InlineKeyboardButton("💳 Пополнить баланс", callback_data="cabinet_buy_balance"))
+    return kb
+
+# --- КЛАСТЕРЫ ---
+def admin_cluster_menu(mode, sales_cluster):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    
+    mode_text = "Авто" if mode == "auto" else "Ручной"
+    kb.add(types.InlineKeyboardButton(f"🔁 Режим: {mode_text}", callback_data="admin_cluster_toggle_mode"))
+    
+    if mode == "manual":
+        curr_sales = sales_cluster if sales_cluster else "Не выбран"
+        kb.add(types.InlineKeyboardButton(f"🎯 Выбран для продажи: {curr_sales}", callback_data="admin_cluster_select_sales"))
+        
+    kb.add(types.InlineKeyboardButton("📋 Список кластеров", callback_data="admin_cluster_list"))
+    kb.add(types.InlineKeyboardButton("🔄 Обновить из Marzban", callback_data="admin_cluster_sync"))
+    kb.add(types.InlineKeyboardButton("🔙 Назад в админку", callback_data="admin_back"))
+    return kb
+
+def admin_cluster_list_menu(clusters):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for c in clusters:
+        status = "🟢" if c['is_active'] else "🔴"
+        text = f"{status} {c['inbound_tag']} ({c['users_count']}/{c['max_users']})"
+        kb.add(types.InlineKeyboardButton(text, callback_data=f"admin_cluster_edit_{c['inbound_tag']}"))
+    kb.add(types.InlineKeyboardButton("🔙 Назад", callback_data="admin_cluster_menu"))
+    return kb
+
+def admin_cluster_edit_menu(cluster):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    tag = cluster['inbound_tag']
+    is_active = cluster['is_active']
+    
+    status_btn = "🔴 Выключить" if is_active else "🟢 Включить"
+    kb.add(types.InlineKeyboardButton(status_btn, callback_data=f"admin_cluster_toggle_{tag}"))
+    kb.add(types.InlineKeyboardButton(f"⚙️ Изменить лимит ({cluster['max_users']})", callback_data=f"admin_cluster_setlimit_{tag}"))
+    kb.add(types.InlineKeyboardButton("🔙 Назад", callback_data="admin_cluster_list"))
+    return kb
+
+def admin_cluster_select_menu(clusters):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    for c in clusters:
+        status = "🟢" if c['is_active'] else "🔴"
+        text = f"{status} {c['inbound_tag']} ({c['users_count']}/{c['max_users']})"
+        kb.add(types.InlineKeyboardButton(text, callback_data=f"admin_cluster_setsales_{c['inbound_tag']}"))
+    kb.add(types.InlineKeyboardButton("❌ Очистить выбор", callback_data="admin_cluster_setsales_NONE"))
+    kb.add(types.InlineKeyboardButton("🔙 Назад", callback_data="admin_cluster_menu"))
     return kb

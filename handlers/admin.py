@@ -237,12 +237,15 @@ def grant_sub_final(call):
         username = f"user_{user_id}"
         res = marzban._request_with_retry(requests.get, f"/api/user/{username}")
         if res.status_code == 200:
+            user_data = res.json()
+            user_data['expire'] = expire
+            user_data['status'] = "active"
             marzban._request_with_retry(
                 requests.put, f"/api/user/{username}",
-                json={"expire": expire, "status": "active"}
+                json=user_data
             )
         else:
-            vless_inbounds = marzban._get_vless_inbounds()
+            vless_inbounds = marzban.get_vless_inbounds()
             payload = {
                 "username": username,
                 "proxies": {"vless": {"flow": "xtls-rprx-vision"}},
@@ -252,10 +255,6 @@ def grant_sub_final(call):
                 "status": "active"
             }
             marzban._request_with_retry(requests.post, "/api/user", json=payload)
-            marzban._request_with_retry(
-                requests.put, f"/api/user/{username}",
-                json={"expire": expire, "status": "active"}
-            )
             
         bot.edit_message_text(
             f"⏳ Тестовая подписка на 1 минуту выдана пользователю {user_id}!",
@@ -269,6 +268,11 @@ def grant_sub_final(call):
 
     # Обработка удаления подписки
     if days == -2:
+        cluster = db.get_user_cluster(user_id)
+        if cluster:
+            db.change_cluster_users_count(cluster, -1)
+            db.set_user_cluster(user_id, None)
+            
         db.revoke_subscription(user_id)
         marzban.delete_user(user_id)
         bot.edit_message_text(
@@ -281,8 +285,15 @@ def grant_sub_final(call):
             pass
         return
 
+    cluster = db.get_user_cluster(user_id)
+    if not cluster:
+        cluster = db.allocate_cluster()
+        if cluster:
+            db.set_user_cluster(user_id, cluster)
+            db.change_cluster_users_count(cluster, 1)
+
     db.add_subscription(user_id, days)
-    marzban.add_days(user_id, days)
+    marzban.add_days(user_id, days, cluster_tag=cluster)
 
     label = "♾️ Навсегда" if days == 0 else keyboards.format_days(days)
     bot.edit_message_text(
@@ -515,6 +526,149 @@ def admin_dashboard(call):
     except Exception:
         bot.send_message(call.message.chat.id, text, reply_markup=kb, parse_mode="HTML")
 
+
+
+# ==========================================
+#          КЛАСТЕРЫ
+# ==========================================
+@bot.callback_query_handler(func=lambda c: c.data == "admin_cluster_menu")
+def admin_cluster_menu_handler(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    mode = db.get_setting("cluster_mode", "auto")
+    sales_cluster = db.get_setting("sales_cluster", "")
+    try:
+        bot.edit_message_text(
+            "🌐 <b>Кластеры (Inbounds)</b>\n\nУправляйте серверами и распределением пользователей:",
+            call.message.chat.id, call.message.message_id,
+            reply_markup=keyboards.admin_cluster_menu(mode, sales_cluster),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            raise
+
+@bot.callback_query_handler(func=lambda c: c.data == "admin_cluster_toggle_mode")
+def admin_cluster_toggle_mode(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    current_mode = db.get_setting("cluster_mode", "auto")
+    new_mode = "manual" if current_mode == "auto" else "auto"
+    db.set_setting("cluster_mode", new_mode)
+    
+    bot.answer_callback_query(call.id, f"Режим изменен на {new_mode}")
+    admin_cluster_menu_handler(call)
+
+@bot.callback_query_handler(func=lambda c: c.data == "admin_cluster_select_sales")
+def admin_cluster_select_sales(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    clusters = db.get_all_clusters()
+    bot.edit_message_text(
+        "🎯 Выберите кластер, в который будут попадать новые пользователи (даже сверх лимита):",
+        call.message.chat.id, call.message.message_id,
+        reply_markup=keyboards.admin_cluster_select_menu(clusters),
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("admin_cluster_setsales_"))
+def admin_cluster_setsales(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    tag = call.data.split("admin_cluster_setsales_")[1]
+    
+    if tag == "NONE":
+        db.set_setting("sales_cluster", "")
+        bot.answer_callback_query(call.id, "Выбор очищен")
+    else:
+        db.set_setting("sales_cluster", tag)
+        bot.answer_callback_query(call.id, f"Кластер продаж: {tag}")
+        
+    admin_cluster_menu_handler(call)
+
+@bot.callback_query_handler(func=lambda c: c.data == "admin_cluster_list")
+def admin_cluster_list(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    clusters = db.get_all_clusters()
+    if not clusters:
+        bot.answer_callback_query(call.id, "Кластеры не найдены. Нажмите 'Обновить из Marzban'", show_alert=True)
+        return
+        
+    bot.edit_message_text(
+        "📋 <b>Список кластеров:</b>",
+        call.message.chat.id, call.message.message_id,
+        reply_markup=keyboards.admin_cluster_list_menu(clusters),
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data == "admin_cluster_sync")
+def admin_cluster_sync(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    bot.answer_callback_query(call.id, "🔄 Синхронизация с Marzban...")
+    inbounds = marzban.get_vless_inbounds()
+    added = 0
+    for tag in inbounds:
+        if db.get_cluster(tag) is None:
+            db.add_cluster(tag, max_users=10, is_active=0)
+            added += 1
+            
+    bot.answer_callback_query(call.id, f"Синхронизировано. Добавлено: {added}")
+    admin_cluster_menu_handler(call)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("admin_cluster_edit_"))
+def admin_cluster_edit(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    tag = call.data.split("admin_cluster_edit_")[1]
+    cluster = db.get_cluster(tag)
+    if not cluster:
+        bot.answer_callback_query(call.id, "Кластер не найден")
+        return
+        
+    status = "🟢 Включен" if cluster['is_active'] else "🔴 Выключен"
+    text = (
+        f"⚙️ <b>Настройка кластера: {tag}</b>\n\n"
+        f"Статус: {status}\n"
+        f"Пользователи: {cluster['users_count']} / {cluster['max_users']}\n"
+    )
+    bot.edit_message_text(
+        text,
+        call.message.chat.id, call.message.message_id,
+        reply_markup=keyboards.admin_cluster_edit_menu(cluster),
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("admin_cluster_toggle_") and not c.data.startswith("admin_cluster_toggle_mode"))
+def admin_cluster_toggle(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    tag = call.data.split("admin_cluster_toggle_")[1]
+    cluster = db.get_cluster(tag)
+    if cluster:
+        new_status = 0 if cluster['is_active'] else 1
+        db.update_cluster(tag, cluster['max_users'], new_status)
+        bot.answer_callback_query(call.id, "Статус изменен")
+        # Перерисовываем меню
+        call.data = f"admin_cluster_edit_{tag}"
+        admin_cluster_edit(call)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("admin_cluster_setlimit_"))
+def admin_cluster_setlimit_start(call):
+    if call.from_user.id != Config.ADMIN_ID: return
+    tag = call.data.split("admin_cluster_setlimit_")[1]
+    
+    msg = bot.send_message(call.message.chat.id, f"Введите новый лимит пользователей для кластера {tag}:", reply_markup=keyboards.cancel_admin_action())
+    bot.register_next_step_handler(msg, process_cluster_limit, tag)
+
+def process_cluster_limit(message, tag):
+    if message.from_user.id != Config.ADMIN_ID: return
+    if message.text == "🔙 Отмена": return
+    
+    if not message.text.isdigit() or int(message.text) < 0:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, введите положительное число.")
+        return
+        
+    limit = int(message.text)
+    cluster = db.get_cluster(tag)
+    if cluster:
+        db.update_cluster(tag, limit, cluster['is_active'])
+        bot.send_message(message.chat.id, f"✅ Лимит для {tag} установлен на {limit}.")
+    else:
+        bot.send_message(message.chat.id, "❌ Кластер не найден.")
 
 
 # ==========================================

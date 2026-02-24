@@ -90,17 +90,36 @@ def start(message):
         # --- ЛОГИКА ТРИАЛА ---
         trial_days = int(db.get_setting("trial_days", "0"))
         if trial_days > 0:
-            db.add_subscription(message.from_user.id, trial_days)
-            db.set_trial_used(message.from_user.id)
-            
-            marzban.add_days(message.from_user.id, trial_days)
-            bot.send_message(message.chat.id, f"🎁 **Сюрприз!** Вам автоматически начислен бесплатный тестовый период на {trial_days} дн.!", parse_mode="Markdown")
+            cluster = db.allocate_cluster()
+            if not cluster:
+                bot.send_message(message.chat.id, "❌ Извините, сейчас нет свободных серверов для тестового периода. Специалисты уже решают проблему!")
+            else:
+                db.set_user_cluster(message.from_user.id, cluster)
+                db.change_cluster_users_count(cluster, 1)
+                
+                db.add_subscription(message.from_user.id, trial_days)
+                db.set_trial_used(message.from_user.id)
+                
+                marzban.add_days(message.from_user.id, trial_days, cluster_tag=cluster)
+                bot.send_message(message.chat.id, f"🎁 **Сюрприз!** Вам автоматически начислен бесплатный тестовый период на {trial_days} дн.!", parse_mode="Markdown")
         # ----------------------
         
     if gift_code:
+        cluster = db.get_user_cluster(message.from_user.id)
+        is_new_cluster = False
+        if not cluster:
+            cluster = db.allocate_cluster()
+            if not cluster:
+                bot.send_message(message.chat.id, "❌ Извините, сейчас нет свободных серверов для активации подарка. Специалисты уже решают проблему!", reply_markup=keyboards.main_menu())
+                return
+            is_new_cluster = True
+            
         res = db.activate_gift(gift_code, message.from_user.id)
         if isinstance(res, int):
-            marzban.add_days(message.from_user.id, res)
+            if is_new_cluster:
+                db.set_user_cluster(message.from_user.id, cluster)
+                db.change_cluster_users_count(cluster, 1)
+            marzban.add_days(message.from_user.id, res, cluster_tag=cluster)
             bot.send_message(message.chat.id, f"🎉 Поздравляем! Вы успешно активировали подарочную подписку на {res} дней!", reply_markup=keyboards.main_menu())
             return
         elif res == "already_activated":
@@ -137,8 +156,7 @@ def cabinet_buy_balance_handler(call):
 @bot.message_handler(func=lambda m: m.text == "🤝 Реферальная система")
 def referral_system(message):
     user = db.get_user(message.from_user.id)
-    bot_info = bot.get_me()
-    ref_link = f"https://t.me/{bot_info.username}?start={message.from_user.id}"
+    ref_link = f"https://t.me/{Config.BOT_USERNAME}?start={message.from_user.id}"
     ref_percent = int(db.get_setting("ref_percent", "20"))
     
     text = (
@@ -437,8 +455,19 @@ def buy_sub(call):
     
     if user['balance'] >= price:
         db.update_balance(user_id, -price)
+        
+        cluster = db.get_user_cluster(user_id)
+        if not cluster:
+            cluster = db.allocate_cluster()
+            if not cluster:
+                db.update_balance(user_id, price) # Возврат средств
+                bot.answer_callback_query(call.id, "❌ Извините, сейчас нет свободных серверов. Админ уже решает проблему!", show_alert=True)
+                return
+            db.set_user_cluster(user_id, cluster)
+            db.change_cluster_users_count(cluster, 1)
+                
         db.add_subscription(user_id, days)
-        marzban.add_days(user_id, days)
+        marzban.add_days(user_id, days, cluster_tag=cluster)
         
         label = keyboards.format_days(days)
         bot.send_message(call.message.chat.id, f"✅ Подписка на {label} оформлена!", reply_markup=keyboards.cabinet_menu())
@@ -474,8 +503,7 @@ def buy_gift_sub(call):
         
         db.create_gift(gift_code, user_id, days)
         
-        bot_info = bot.get_me()
-        gift_link = f"https://t.me/{bot_info.username}?start={gift_code}"
+        gift_link = f"https://t.me/{Config.BOT_USERNAME}?start={gift_code}"
         
         label = keyboards.format_days(days)
         share_text = f"🎁 Держи подарок! Я дарю тебе подписку на {label}! 🚀 Забирай по ссылке ниже 👇\n\n{gift_link}"

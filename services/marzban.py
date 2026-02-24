@@ -41,7 +41,7 @@ class MarzbanService:
             res = method(f"{self.url}{path}", headers=headers, verify=False, **kwargs)
         return res
 
-    def _get_vless_inbounds(self):
+    def get_vless_inbounds(self):
         """Получает список VLESS inbound тегов"""
         try:
             res = self._request_with_retry(requests.get, "/api/inbounds", timeout=5)
@@ -74,7 +74,7 @@ class MarzbanService:
             print(f"Error fetching Marzban link: {e}")
         return None
 
-    def add_days(self, user_id, days):
+    def add_days(self, user_id, days, cluster_tag=None):
         username = f"user_{user_id}"
 
         try:
@@ -83,24 +83,32 @@ class MarzbanService:
 
             if res.status_code == 200:
                 # Юзер существует — продлеваем
+                user_data = res.json()
+                current_expire = user_data.get('expire', 0) or 0
+                
                 if days > 0:
-                    current_expire = res.json().get('expire', 0) or 0
-                    new_expire = Database.calc_expiry(max(current_expire, now), days)
+                    user_data['expire'] = Database.calc_expiry(max(current_expire, now), days)
+                    user_data['status'] = "active"
                     self._request_with_retry(
                         requests.put, f"/api/user/{username}",
-                        json={"expire": new_expire, "status": "active"}
+                        json=user_data
                     )
-                elif days == 0 and res.json().get('expire', 0) != 0:
+                elif days == 0 and current_expire != 0:
                     # Навсегда: expire=0
+                    user_data['expire'] = 0
+                    user_data['status'] = "active"
                     self._request_with_retry(
                         requests.put, f"/api/user/{username}",
-                        json={"expire": 0, "status": "active"}
+                        json=user_data
                     )
 
             elif days >= 0:
                 # Юзер не существует — создаём
                 new_expire = 0 if days == 0 else Database.calc_expiry(now, days)
-                vless_inbounds = self._get_vless_inbounds()
+                if cluster_tag:
+                    vless_inbounds = [cluster_tag]
+                else:
+                    vless_inbounds = self.get_vless_inbounds()
                 payload = {
                     "username": username,
                     "proxies": {"vless": {"flow": "xtls-rprx-vision"}},

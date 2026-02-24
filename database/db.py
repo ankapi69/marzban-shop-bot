@@ -8,6 +8,11 @@ class Database:
     def __init__(self, path):
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.cursor = self.conn.cursor()
+        
+        # Включаем режим WAL для многопоточности бота
+        self.cursor.execute("PRAGMA journal_mode=WAL;")
+        self.cursor.execute("PRAGMA synchronous=NORMAL;")
+        
         self.create_table()
 
     def create_table(self):
@@ -46,12 +51,24 @@ class Database:
                 "referral_earned INTEGER DEFAULT 0",
                 "trial_used INTEGER DEFAULT 0",
                 "notified_expiry INTEGER DEFAULT 0",
+                "cluster TEXT",
             ]:
                 try:
-                    self.cursor.execute(f"ALTER TABLE users ADD COLUMN {col}")
+                    with self.conn:
+                        self.cursor.execute(f"ALTER TABLE users ADD COLUMN {col}")
                 except sqlite3.OperationalError:
                     pass  # Колонка уже существует
             
+            # Таблица кластеров
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS clusters (
+                    inbound_tag TEXT PRIMARY KEY,
+                    users_count INTEGER DEFAULT 0,
+                    max_users INTEGER DEFAULT 0,
+                    is_active INTEGER DEFAULT 0
+                )
+            """)
+
             # Таблица подарков
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS gifts (
@@ -87,6 +104,8 @@ class Database:
             self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('trial_days', '0')")
             self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ref_percent', '20')")
             self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('min_topup', '10')")
+            self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cluster_mode', 'auto')")
+            self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('sales_cluster', '')")
             # Тарифы: JSON словарь {"дни": цена}
             default_tariffs = json.dumps({"7": 50, "30": 150, "90": 400})
             self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('tariffs', ?)", (default_tariffs,))
@@ -421,3 +440,73 @@ class Database:
             "total_referrals": total_referrals,
             "top_referrers": top_referrers,
         }
+
+    # --- КЛАСТЕРЫ ---
+    def get_cluster(self, inbound_tag):
+        self.cursor.execute("SELECT * FROM clusters WHERE inbound_tag = ?", (inbound_tag,))
+        res = self.cursor.fetchone()
+        if res:
+            col_names = [description[0] for description in self.cursor.description]
+            return dict(zip(col_names, res))
+        return None
+
+    def get_all_clusters(self):
+        self.cursor.execute("SELECT * FROM clusters")
+        res = self.cursor.fetchall()
+        if res:
+            col_names = [description[0] for description in self.cursor.description]
+            return [dict(zip(col_names, row)) for row in res]
+        return []
+
+    def get_active_clusters(self):
+        self.cursor.execute("SELECT * FROM clusters WHERE is_active = 1")
+        res = self.cursor.fetchall()
+        if res:
+            col_names = [description[0] for description in self.cursor.description]
+            return [dict(zip(col_names, row)) for row in res]
+        return []
+
+    def add_cluster(self, inbound_tag, max_users, is_active=1):
+        with self.conn:
+            self.cursor.execute("INSERT OR IGNORE INTO clusters (inbound_tag, max_users, is_active) VALUES (?, ?, ?)",
+                                (inbound_tag, max_users, is_active))
+
+    def update_cluster(self, inbound_tag, max_users, is_active):
+        with self.conn:
+            self.cursor.execute("UPDATE clusters SET max_users = ?, is_active = ? WHERE inbound_tag = ?",
+                                (max_users, is_active, inbound_tag))
+
+    def delete_cluster(self, inbound_tag):
+        with self.conn:
+            self.cursor.execute("DELETE FROM clusters WHERE inbound_tag = ?", (inbound_tag,))
+
+    def change_cluster_users_count(self, inbound_tag, delta):
+        with self.conn:
+            self.cursor.execute("UPDATE clusters SET users_count = max(0, users_count + ?) WHERE inbound_tag = ?", (delta, inbound_tag))
+
+    def set_user_cluster(self, user_id, cluster_tag):
+        with self.conn:
+            self.cursor.execute("UPDATE users SET cluster = ? WHERE user_id = ?", (cluster_tag, user_id))
+
+    def get_user_cluster(self, user_id):
+        self.cursor.execute("SELECT cluster FROM users WHERE user_id = ?", (user_id,))
+        res = self.cursor.fetchone()
+        return res[0] if res else None
+
+    def allocate_cluster(self):
+        """Возвращает тег кластера для нового пользователя в зависимости от режима"""
+        mode = self.get_setting("cluster_mode", "auto")
+        
+        if mode == "manual":
+            sales_cluster = self.get_setting("sales_cluster", "")
+            if sales_cluster:
+                return sales_cluster
+            # Если не выбран, пробуем авто-режим
+        
+        # Авто-режим: ищем первый активный кластер, где users_count < max_users
+        self.cursor.execute("SELECT inbound_tag FROM clusters WHERE is_active = 1 AND users_count < max_users LIMIT 1")
+        res = self.cursor.fetchone()
+        if res:
+            return res[0]
+            
+        return None  # Нет доступных кластеров
