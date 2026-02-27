@@ -7,6 +7,8 @@ from config import Config
 from loader import bot, db
 from utils.notifications import notify_payment
 
+from waitress import serve
+
 app = Flask(__name__)
 
 
@@ -89,4 +91,8 @@ def lava_webhook():
 
 
 def run_server():
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    # запуск фласк
+    # app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    # запуск waitress
+    serve(app, host='0.0.0.0', port=5000)
+    
