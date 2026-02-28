@@ -7,7 +7,7 @@ from utils.notifications import notify_payment
 import time
 import uuid
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 import telebot.apihelper
 
 def _safe_edit(text, chat_id, message_id, **kwargs):
@@ -62,8 +62,10 @@ def get_sub_status(user_id):
             return f"♾️ Активна навсегда\n\n🔗 Твоя ссылка:\n`{link}`"
         return "❌ Не активна"
     if user['sub_end'] > now:
-        date_str = datetime.fromtimestamp(user['sub_end']).strftime('%d.%m.%Y %H:%M')
-        link = marzban.get_user_link(user_id)
+        msk_time = datetime.fromtimestamp(user['sub_end']) + timedelta(hours=3)
+        date_str = msk_time.strftime('%d.%m.%Y %H:%M')
+        #date_str = datetime.fromtimestamp(user['sub_end']).strftime('%d.%m.%Y %H:%M')
+        #link = marzban.get_user_link(user_id)
         return f"✅ Активна до: `{date_str}`\n\n🔗 Твоя ссылка:\n`{link}`"
     return "❌ Не активна"
 
