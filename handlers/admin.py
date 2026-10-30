@@ -807,7 +807,7 @@ def admin_export_db(call):
     
     # Сохраняем во временный файл
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = os.path.join(tempfile.gettempdir(), f"erebus_db_{timestamp}.xlsx")
+    filepath = os.path.join(tempfile.gettempdir(), f"marzban_shop_bot_db_{timestamp}.xlsx")
     wb.save(filepath)
     
     # Отправляем файлом
@@ -850,7 +850,7 @@ def admin_export_raw(call):
             bot.send_document(
                 call.message.chat.id, 
                 f, 
-                visible_file_name=f"vpn_bot_backup_{int(time.time())}.db",
+                visible_file_name=f"marzban_shop_bot_backup_{int(time.time())}.db",
                 caption="📥 Безопасный экспорт базы данных (включая WAL)"
             )
             

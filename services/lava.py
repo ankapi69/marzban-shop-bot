@@ -40,8 +40,8 @@ def create_invoice(amount, user_id):
         "expire": 300,
         "comment": f"Pay: {user_id}",
         "hookUrl": f"{Config.BASE_URL}/webhook",
-        "failUrl": "https://t.me/erebusproxy_bot",
-        "successUrl": "https://t.me/erebusproxy_bot"
+        "failUrl": f"https://t.me/{Config.BOT_USERNAME}",
+        "successUrl": f"https://t.me/{Config.BOT_USERNAME}"
     }
 
     try:

@@ -1,4 +1,6 @@
-# Erebus Proxy
+# Marzban Shop Bot
+
+*ex Erebus Proxy*
 
 **Telegram-бот для продажи и управления VLESS-подписками через Marzban.**
 
@@ -107,8 +109,8 @@ Docker устанавливает только приложение и его Py
 ### Linux / macOS
 
 ```bash
-git clone https://github.com/ankapi69/erebus_proxy.git
-cd erebus_proxy
+git clone https://github.com/ankapi69/marzban_sale_telegram_bot.git marzban-shop-bot
+cd marzban-shop-bot
 python3.10 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -118,8 +120,8 @@ cp .env.example .env
 ### Windows / PowerShell
 
 ```powershell
-git clone https://github.com/ankapi69/erebus_proxy.git
-cd erebus_proxy
+git clone https://github.com/ankapi69/marzban_sale_telegram_bot.git marzban-shop-bot
+cd marzban-shop-bot
 py -3.10 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 Copy-Item .env.example .env
@@ -219,17 +221,17 @@ __pycache__
 Следующий пример рассчитан на Linux-сервер. После заполнения `.env`:
 
 ```bash
-docker build -t erebus-proxy .
-docker volume create erebus-proxy-data
+docker build -t marzban-shop-bot .
+docker volume create marzban-shop-bot-data
 docker run -d \
-  --name erebus-proxy \
+  --name marzban-shop-bot \
   --restart unless-stopped \
   --env-file .env \
-  --mount source=erebus-proxy-data,target=/data \
+  --mount source=marzban-shop-bot-data,target=/data \
   --workdir /data \
   -e TZ=UTC \
   -p 127.0.0.1:5000:5000 \
-  erebus-proxy python /app/main.py
+  marzban-shop-bot python /app/main.py
 ```
 
 Здесь код запускается из `/app`, а относительный файл `vpn_bot.db` и его WAL/SHM размещаются в постоянном томе `/data`. Новая пустая область данных не импортирует существующую базу автоматически. Не удаляйте том, если хотите сохранить пользователей и баланс.
@@ -237,9 +239,9 @@ docker run -d \
 Порт публикуется только на localhost хоста: предполагается HTTPS-прокси на том же сервере. Если прокси находится в другом контейнере, настройте общую Docker-сеть и адрес приложения в этой сети.
 
 ```bash
-docker logs -f erebus-proxy
-docker stop erebus-proxy
-docker start erebus-proxy
+docker logs -f marzban-shop-bot
+docker stop marzban-shop-bot
+docker start marzban-shop-bot
 ```
 
 Один токен бота должен обслуживаться одним экземпляром polling-процесса.
@@ -285,7 +287,7 @@ SQLite хранит пользователей, баланс, сроки под�
 | **Ограничения валидации и учёта денег** | Быстрые суммы обходят проверку `min_topup` из ручного ввода; у части callback и админских чисел нет единых границ. Lava использует `float`, а путь ручной проверки — `int`. | Ввести общую валидацию и единый денежный формат, например целые копейки или `Decimal`. |
 | **Неоднозначные идентификаторы и время** | Lava `order_id` зависит от пользователя и секундного timestamp, поэтому два счёта за секунду могут совпасть. Даты подписки выводятся с ручным прибавлением трёх часов. | Использовать уникальные идентификаторы счетов и явные часовые пояса. |
 | **Нет инфраструктуры проверки** | В репозитории нет автоматических тестов и CI; версия `waitress` не зафиксирована. Рассылка не обрабатывает ограничения Telegram с повторной доставкой. | Добавить тесты платежей/гонок, проверку зависимостей, воспроизводимые версии и очередь рассылок. |
-| **Настройки частично зашиты в код** | Ссылки возврата Lava и информационные ссылки находятся в исходниках; конфигурация не проверяет обязательные поля до создания сервисов. Контейнер запускается от root. | Вынести параметры в конфигурацию, добавить проверку при старте и пользователя контейнера без привилегий. |
+| **Настройки частично зашиты в код** | Информационные ссылки, путь к БД и адрес HTTP-сервера находятся в исходниках; конфигурация не проверяет обязательные поля до создания сервисов. Контейнер запускается от root. | Вынести параметры в конфигурацию, добавить проверку при старте и пользователя контейнера без привилегий. |
 
 **Приоритет доработок:** сначала доверие к платежам и проверка TLS, затем права администратора, атомарность операций и изоляция доступа к БД. После этого — согласованность с Marzban, защита подарков, резервное копирование и автоматические проверки.
 
@@ -302,4 +304,4 @@ SQLite хранит пользователей, баланс, сроки под�
 | CryptoBot не создаёт счёт | Токен приложения Crypto Pay и ответ API. Реализация использует основной API, не testnet. |
 | Данные исчезают после пересоздания контейнера | Рабочую директорию процесса и постоянный том, в котором находятся `.db`, WAL и SHM. |
 
-Перед публикацией собственного экземпляра замените ссылки возврата Lava в `services/lava.py`, информационные ссылки в `utils/keyboards.py` и адрес поддержки на свои.
+Перед публикацией собственного экземпляра замените информационные ссылки в `utils/keyboards.py` и адрес поддержки на свои. Ссылки возврата Lava формируются из `Config.BOT_USERNAME`: при успешном запуске это фактическое имя вашего Telegram-бота.
