@@ -109,7 +109,7 @@ Docker устанавливает только приложение и его Py
 ### Linux / macOS
 
 ```bash
-git clone https://github.com/ankapi69/marzban_sale_telegram_bot.git marzban-shop-bot
+git clone https://github.com/ankapi69/marzban-shop-bot.git
 cd marzban-shop-bot
 python3.10 -m venv .venv
 source .venv/bin/activate
@@ -120,7 +120,7 @@ cp .env.example .env
 ### Windows / PowerShell
 
 ```powershell
-git clone https://github.com/ankapi69/marzban_sale_telegram_bot.git marzban-shop-bot
+git clone https://github.com/ankapi69/marzban-shop-bot.git
 cd marzban-shop-bot
 py -3.10 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
